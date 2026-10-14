@@ -1,5 +1,7 @@
 // frontend/src/components/JobMonitorDashboard.jsx
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import { removeJob, setJobs, updateJob } from "../store";
 
 const API_BASE = "http://localhost:3000/api/v1";
 
@@ -11,7 +13,9 @@ const TABS = [
 ];
 
 export default function JobMonitorDashboard() {
-  const [jobs, setJobs] = useState([]);
+  const dispatch = useDispatch();
+  const jobs = useSelector((state) => state.jobs);
+  const user = useSelector((state) => state.app.user);
   const [activeTab, setActiveTab] = useState("all");
   const [locationSearch, setLocationSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -23,24 +27,30 @@ export default function JobMonitorDashboard() {
     location: "Remote",
     email: "developer@example.com",
   });
+  const visibleTabs = user
+    ? TABS
+    : TABS.filter((tab) => tab.id === "all");
+  const selectedTab =
+    !user && activeTab !== "all"
+      ? "all"
+      : activeTab;
 
-  useEffect(() => {
-    fetchJobs();
-  }, []);
-
-  const fetchJobs = async () => {
+  const fetchJobs = useCallback(async () => {
     try {
-      setLoading(true);
       const res = await fetch(`${API_BASE}/jobs`);
       const data = await res.json();
-      setJobs(Array.isArray(data) ? data : []);
+      dispatch(setJobs(Array.isArray(data) ? data : []));
     } catch (err) {
       console.error("Failed to load jobs:", err);
-      setJobs([]);
+      dispatch(setJobs([]));
     } finally {
       setLoading(false);
     }
-  };
+  }, [dispatch]);
+
+  useEffect(() => {
+    fetchJobs();
+  }, [fetchJobs]);
 
   const handleToggle = async (jobId, action) => {
     try {
@@ -50,9 +60,7 @@ export default function JobMonitorDashboard() {
       });
       const updatedJob = await res.json();
 
-      setJobs((prevJobs) =>
-        prevJobs.map((j) => (j.id === updatedJob.id ? updatedJob : j))
-      );
+      dispatch(updateJob(updatedJob));
     } catch (error) {
       console.error(`Failed to execute ${action}:`, error);
     }
@@ -66,7 +74,7 @@ export default function JobMonitorDashboard() {
         headers: { "Content-Type": "application/json" },
       });
       if (res.ok) {
-        setJobs((prev) => prev.filter((j) => j.id !== jobId));
+        dispatch(removeJob(jobId));
       }
     } catch (err) {
       console.error("Failed to dismiss:", err);
@@ -88,10 +96,11 @@ export default function JobMonitorDashboard() {
       setStatusMessage(data.message);
 
       setTimeout(() => {
+        setLoading(true);
         fetchJobs();
         setPolling(false);
       }, 3500);
-    } catch (err) {
+    } catch {
       setStatusMessage("Failed to initiate scan.");
       setPolling(false);
     }
@@ -108,9 +117,9 @@ export default function JobMonitorDashboard() {
     return jobs.filter((job) => {
       // Tab check
       let matchesTab = true;
-      if (activeTab === "saved") matchesTab = Boolean(job.saved);
-      else if (activeTab === "applied") matchesTab = Boolean(job.applied);
-      else if (activeTab === "unapplied") matchesTab = !job.applied;
+      if (selectedTab === "saved") matchesTab = Boolean(job.saved);
+      else if (selectedTab === "applied") matchesTab = Boolean(job.applied);
+      else if (selectedTab === "unapplied") matchesTab = !job.applied;
 
       // Location check
       const jobLoc = (job.location || "").toLowerCase();
@@ -119,7 +128,7 @@ export default function JobMonitorDashboard() {
 
       return matchesTab && matchesLocation;
     });
-  }, [jobs, activeTab, locationSearch]);
+  }, [jobs, selectedTab, locationSearch]);
 
   const tabCounts = useMemo(() => ({
     all: jobs.length,
@@ -129,45 +138,75 @@ export default function JobMonitorDashboard() {
   }), [jobs]);
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-6 font-sans text-gray-900">
-      <header className="border-b pb-4">
-        <h1 className="text-3xl font-bold tracking-tight">LinkedIn Job Radar</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Monitor recent postings, filter by location, and preserve important records.
-        </p>
+    <div className="dashboard-page">
+      <div className="dashboard-content">
+      <header className="dashboard-heading">
+        <div>
+          <p className="eyebrow">Your workspace</p>
+          <h1>Job dashboard</h1>
+          <p>Keep track of promising roles and stay on top of your applications.</p>
+        </div>
       </header>
 
-      {/* Scrape Controls */}
-      <form onSubmit={handlePoll} className="bg-gray-50 p-5 rounded-lg border border-gray-200 flex flex-wrap gap-4 items-end">
-        <div className="flex-1 min-w-[200px]">
-          <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Keywords</label>
+      {user && (
+      <section className="dashboard-stats" aria-label="Job posting summary">
+        {[
+          { label: "Total postings", value: tabCounts.all, dot: "" },
+          { label: "Saved for later", value: tabCounts.saved, dot: "stat-dot-saved" },
+          { label: "Applications sent", value: tabCounts.applied, dot: "stat-dot-applied" },
+          { label: "Not yet applied", value: tabCounts.unapplied, dot: "stat-dot-open" },
+        ].map((stat) => (
+          <article className="stat-card" key={stat.label}>
+            <p className="stat-label">
+              <span className={`stat-dot ${stat.dot}`} aria-hidden="true" />
+              {stat.label}
+            </p>
+            <strong className="stat-value">{stat.value}</strong>
+          </article>
+        ))}
+      </section>
+      )}
+
+      <form onSubmit={handlePoll} className="scan-panel">
+        <div className="section-heading">
+          <div>
+            <h2>Find new opportunities</h2>
+            <p>Choose what to search for and we’ll look for matching roles.</p>
+          </div>
+        </div>
+        <div className="scan-fields">
+        <div className="field-group">
+          <label htmlFor="job-keywords">Keywords</label>
           <input
+            id="job-keywords"
             type="text"
             value={filters.keywords}
             onChange={(e) => setFilters({ ...filters, keywords: e.target.value })}
-            className="w-full px-3 py-2 border rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            className="dashboard-input"
             required
           />
         </div>
 
-        <div className="flex-1 min-w-[160px]">
-          <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Scrape Target Location</label>
+        <div className="field-group">
+          <label htmlFor="job-location">Location</label>
           <input
+            id="job-location"
             type="text"
             value={filters.location}
             onChange={(e) => setFilters({ ...filters, location: e.target.value })}
-            className="w-full px-3 py-2 border rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            className="dashboard-input"
             required
           />
         </div>
 
-        <div className="flex-1 min-w-[220px]">
-          <label className="block text-xs font-semibold text-gray-600 uppercase mb-1">Alert Email</label>
+        <div className="field-group">
+          <label htmlFor="alert-email">Alert email</label>
           <input
+            id="alert-email"
             type="email"
             value={filters.email}
             onChange={(e) => setFilters({ ...filters, email: e.target.value })}
-            className="w-full px-3 py-2 border rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            className="dashboard-input"
             required
           />
         </div>
@@ -175,35 +214,34 @@ export default function JobMonitorDashboard() {
         <button
           type="submit"
           disabled={polling}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 py-2 rounded-md text-sm transition-colors disabled:opacity-50"
+          className="primary-button"
         >
-          {polling ? "Scanning..." : "Check Now"}
+          {polling ? "Scanning..." : "Check for jobs"}
         </button>
+        </div>
       </form>
 
       {statusMessage && (
-        <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 rounded-md text-sm">
+        <div className="status-message" role="status">
           {statusMessage}
         </div>
       )}
 
-      {/* Secondary Bar: Tabs + Location Search */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-200 gap-4 pb-3">
-        <nav className="flex space-x-2 -mb-px">
-          {TABS.map((tab) => {
-            const isActive = activeTab === tab.id;
+      <section className="jobs-panel" aria-label="Job postings">
+      <div className="jobs-toolbar">
+        <nav className="job-tabs" aria-label="Filter postings by status">
+          {visibleTabs.map((tab) => {
+            const isActive = selectedTab === tab.id;
             return (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`py-2 px-3 font-medium text-sm border-b-2 flex items-center space-x-2 transition-colors ${
-                  isActive
-                    ? "border-blue-600 text-blue-600 font-semibold"
-                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
+                aria-pressed={isActive}
+                className={`job-tab ${isActive ? "job-tab-active" : ""}`}
               >
-                <span>{tab.label}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${isActive ? "bg-blue-100 text-blue-700 font-bold" : "bg-gray-100 text-gray-600"}`}>
+                {tab.label}
+                <span className="job-tab-count">
                   {tabCounts[tab.id]}
                 </span>
               </button>
@@ -211,16 +249,16 @@ export default function JobMonitorDashboard() {
           })}
         </nav>
 
-        {/* Location Filter Input */}
-        <div className="flex items-center space-x-2">
-          <div className="relative">
+        <div className="job-filters">
+          <div className="location-control">
             <input
+              aria-label="Filter postings by location"
               type="text"
               list="location-options"
               placeholder="Filter by location (e.g. Remote)..."
               value={locationSearch}
               onChange={(e) => setLocationSearch(e.target.value)}
-              className="px-3 py-1.5 text-xs border border-gray-300 rounded-md w-56 outline-none focus:ring-2 focus:ring-blue-500"
+              className="dashboard-input location-input"
             />
             <datalist id="location-options">
               {uniqueLocations.map((loc, idx) => (
@@ -229,8 +267,10 @@ export default function JobMonitorDashboard() {
             </datalist>
             {locationSearch && (
               <button
+                type="button"
+                aria-label="Clear location filter"
                 onClick={() => setLocationSearch("")}
-                className="absolute right-2 top-1.5 text-gray-400 hover:text-gray-600 text-xs"
+                className="clear-location"
               >
                 ✕
               </button>
@@ -238,82 +278,88 @@ export default function JobMonitorDashboard() {
           </div>
 
           <button
+            type="button"
             onClick={() => setLocationSearch("Remote")}
-            className={`px-2.5 py-1.5 text-xs rounded-md border transition-colors ${
-              locationSearch.toLowerCase() === "remote"
-                ? "bg-blue-600 text-white border-blue-600"
-                : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
-            }`}
+            aria-pressed={locationSearch.toLowerCase() === "remote"}
+            className={`filter-chip ${locationSearch.toLowerCase() === "remote" ? "filter-chip-active" : ""}`}
           >
             Remote
           </button>
         </div>
       </div>
 
-      {/* Main Table */}
+      <div className="jobs-panel-heading">
+        <h2>Recent postings</h2>
+        {!loading && (
+          <span className="results-count">
+            {filteredJobs.length} {filteredJobs.length === 1 ? "result" : "results"}
+          </span>
+        )}
+      </div>
+
       {loading ? (
-        <div className="py-12 text-center text-sm text-gray-500">Loading postings...</div>
+        <div className="dashboard-placeholder" role="status">Loading postings...</div>
       ) : filteredJobs.length === 0 ? (
-        <div className="py-12 text-center text-sm text-gray-500 border border-dashed rounded-lg">
-          No postings found matching your active tab and location criteria.
+        <div className="dashboard-placeholder">
+          <strong>No postings found</strong>
+          <p>Try another status or location filter, or scan for new opportunities.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto border border-gray-200 rounded-lg">
-          <table className="w-full text-left text-sm border-collapse">
-            <thead className="bg-gray-50 text-gray-600 text-xs uppercase font-semibold border-b">
+        <div className="table-scroll">
+          <table className="jobs-table">
+            <thead>
               <tr>
-                <th className="p-3">Role</th>
-                <th className="p-3">Company</th>
-                <th className="p-3">Location</th>
-                <th className="p-3">Status</th>
-                <th className="p-3 text-center">Manage</th>
-                <th className="p-3 text-right">Link</th>
+                <th scope="col">Role</th>
+                <th scope="col">Company</th>
+                <th scope="col">Location</th>
+                <th scope="col">Alert status</th>
+                <th scope="col" className="text-center">Manage</th>
+                <th scope="col" className="text-right">Link</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
+            <tbody>
               {filteredJobs.map((job) => (
-                <tr key={job.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="p-3 font-medium text-gray-900">{job.title}</td>
-                  <td className="p-3 text-gray-600">{job.company}</td>
-                  <td className="p-3">
-                    <span className="inline-block px-2 py-0.5 text-xs bg-gray-100 rounded text-gray-700">
+                <tr key={job.id}>
+                  <td><span className="job-title" title={job.title}>{job.title}</span></td>
+                  <td><span className="job-company">{job.company}</span></td>
+                  <td>
+                    <span className="location-badge">
                       {job.location || "Not specified"}
                     </span>
                   </td>
-                  <td className="p-3">
-                    <span className={`inline-block px-2 py-0.5 text-xs font-semibold rounded ${
-                      job.notified ? "bg-blue-50 text-blue-700 border border-blue-200" : "bg-gray-100 text-gray-600"
-                    }`}>
+                  <td>
+                    <span className={`status-badge ${job.notified ? "status-notified" : "status-unnotified"}`}>
                       {job.notified ? "Alerted" : "Unnotified"}
                     </span>
                   </td>
-                  <td className="p-3 text-center space-x-2 whitespace-nowrap">
+                  <td>
+                    <div className="job-actions">
                     <button
                       onClick={() => handleToggle(job.id, "toggle_saved")}
-                      className={`px-2.5 py-1 text-xs rounded font-medium border transition-colors ${
-                        job.saved ? "bg-amber-500 text-white border-amber-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
-                      }`}
+                      aria-pressed={Boolean(job.saved)}
+                      className={`table-action ${job.saved ? "table-action-saved" : ""}`}
                     >
-                      {job.saved ? "Saved ★" : "Save ☆"}
+                      {job.saved ? "Saved ★" : "☆ Save"}
                     </button>
                     <button
                       onClick={() => handleToggle(job.id, "toggle_applied")}
-                      className={`px-2.5 py-1 text-xs rounded font-medium border transition-colors ${
-                        job.applied ? "bg-emerald-600 text-white border-emerald-700" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
-                      }`}
+                      aria-pressed={Boolean(job.applied)}
+                      className={`table-action ${job.applied ? "table-action-applied" : ""}`}
                     >
-                      {job.applied ? "Applied ✓" : "Mark Applied"}
+                      {job.applied ? "Applied ✓" : "Mark applied"}
                     </button>
                     <button
                       onClick={() => handleDismiss(job.id)}
-                      className="px-2 py-1 text-xs rounded font-medium border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
+                      className="table-action table-action-remove"
+                      aria-label={`Remove ${job.title}`}
                     >
-                      ✕ Remove
+                      Remove
                     </button>
+                    </div>
                   </td>
-                  <td className="p-3 text-right whitespace-nowrap">
-                    <a href={job.url} target="_blank" rel="noreferrer" className="text-blue-600 font-semibold hover:underline">
-                      View &rarr;
+                  <td className="text-right">
+                    <a href={job.url} target="_blank" rel="noreferrer" className="job-link">
+                      View role →
                     </a>
                   </td>
                 </tr>
@@ -322,6 +368,8 @@ export default function JobMonitorDashboard() {
           </table>
         </div>
       )}
+      </section>
+      </div>
     </div>
   );
 }

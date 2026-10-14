@@ -1,5 +1,15 @@
 import React, { useState } from "react";
 
+async function readAuthResponse(response) {
+  const body = await response.text();
+
+  try {
+    return body ? JSON.parse(body) : {};
+  } catch {
+    throw new Error(body || "The server returned an invalid response.");
+  }
+}
+
 export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
   const [isLogin, setIsLogin] = useState(true);
   const [formData, setFormData] = useState({ name: "", email: "", password: "" });
@@ -13,24 +23,59 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
     setError("");
     setLoading(true);
 
-    const endpoint = isLogin ? "/api/v1/auth/login" : "/api/v1/auth/signup";
+    const loginEndpoint = "/api/v1/auth/login";
+    const endpoint = isLogin ? loginEndpoint : "/api/v1/auth/signup";
+    const authHeaders = {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    };
+    const credentials = {
+      [isLogin ? "api_v1_user" : "user"]: {
+        ...(isLogin ? {} : { name: formData.name }),
+        email: formData.email,
+        password: formData.password,
+      },
+    };
 
     try {
-      const res = await fetch(`http://localhost:3000${endpoint}`, {
+      let res = await fetch(`http://localhost:3000${endpoint}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        headers: authHeaders,
+        body: JSON.stringify(credentials),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Authentication failed");
+      let data = await readAuthResponse(res);
+      if (!res.ok) {
+        throw new Error(data.error || data.errors?.join(", ") || "Authentication failed");
+      }
 
-      // Save token and trigger state update in parent
-      localStorage.setItem("auth_token", data.token);
+      // Extract Bearer token from header
+      if (!isLogin) {
+        res = await fetch(`http://localhost:3000${loginEndpoint}`, {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            api_v1_user: { email: formData.email, password: formData.password },
+          }),
+        });
+        data = await readAuthResponse(res);
+        if (!res.ok) {
+          throw new Error(
+            data.error ||
+              data.errors?.join(", ") ||
+              "Account created, but sign-in failed. Please sign in."
+          );
+        }
+      }
+
+      const token = res.headers.get("Authorization") || data.token;
+      if (!token) throw new Error("Authentication succeeded but no token was returned.");
+
+      localStorage.setItem("auth_token", token);
       onAuthSuccess(data.user);
       onClose();
     } catch (err) {
-      setError(err.message);
+      setError(err instanceof Error ? err.message : "Authentication failed");
     } finally {
       setLoading(false);
     }

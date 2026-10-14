@@ -1,13 +1,18 @@
 import React, { useState } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import { setCurrentView, setUser } from "../store";
 import AuthModal from "./AuthModal";
 
-export default function Navbar({ currentView, setCurrentView, user, setUser }) {
+export default function Navbar() {
+  const dispatch = useDispatch();
+  const currentView = useSelector((state) => state.app.currentView);
+  const user = useSelector((state) => state.app.user);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem("auth_token");
-    setUser(null);
+    dispatch(setUser(null));
   };
 
   return (
@@ -17,7 +22,7 @@ export default function Navbar({ currentView, setCurrentView, user, setUser }) {
           {/* Brand Logo & Title */}
           <div className="flex items-center space-x-8">
             <div 
-              onClick={() => setCurrentView("dashboard")}
+              onClick={() => dispatch(setCurrentView("dashboard"))}
               className="flex items-center space-x-2 cursor-pointer"
             >
               <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-lg">
@@ -29,7 +34,7 @@ export default function Navbar({ currentView, setCurrentView, user, setUser }) {
             {/* Navigation Links */}
             <nav className="hidden md:flex items-center space-x-1">
               <button
-                onClick={() => setCurrentView("dashboard")}
+                onClick={() => dispatch(setCurrentView("dashboard"))}
                 className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                   currentView === "dashboard"
                     ? "bg-gray-100 text-gray-900"
@@ -39,7 +44,7 @@ export default function Navbar({ currentView, setCurrentView, user, setUser }) {
                 Dashboard
               </button>
               <button
-                onClick={() => setCurrentView("analytics")}
+                onClick={() => dispatch(setCurrentView("analytics"))}
                 className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                   currentView === "analytics"
                     ? "bg-gray-100 text-gray-900"
@@ -49,7 +54,7 @@ export default function Navbar({ currentView, setCurrentView, user, setUser }) {
                 Analytics
               </button>
               <button
-                onClick={() => setCurrentView("settings")}
+                onClick={() => dispatch(setCurrentView("settings"))}
                 className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                   currentView === "settings"
                     ? "bg-gray-100 text-gray-900"
@@ -108,19 +113,19 @@ export default function Navbar({ currentView, setCurrentView, user, setUser }) {
         {mobileMenuOpen && (
           <div className="md:hidden border-t border-gray-100 px-6 py-4 space-y-2 bg-white">
             <button
-              onClick={() => { setCurrentView("dashboard"); setMobileMenuOpen(false); }}
+              onClick={() => { dispatch(setCurrentView("dashboard")); setMobileMenuOpen(false); }}
               className="block w-full text-left py-2 text-sm text-gray-700 font-medium"
             >
               Dashboard
             </button>
             <button
-              onClick={() => { setCurrentView("analytics"); setMobileMenuOpen(false); }}
+              onClick={() => { dispatch(setCurrentView("analytics")); setMobileMenuOpen(false); }}
               className="block w-full text-left py-2 text-sm text-gray-700 font-medium"
             >
               Analytics
             </button>
             <button
-              onClick={() => { setCurrentView("settings"); setMobileMenuOpen(false); }}
+              onClick={() => { dispatch(setCurrentView("settings")); setMobileMenuOpen(false); }}
               className="block w-full text-left py-2 text-sm text-gray-700 font-medium"
             >
               Settings
@@ -149,7 +154,7 @@ export default function Navbar({ currentView, setCurrentView, user, setUser }) {
       <AuthModal
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
-        onAuthSuccess={(userData) => setUser(userData)}
+        onAuthSuccess={(userData) => dispatch(setUser(userData))}
       />
     </>
   );
